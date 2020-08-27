@@ -407,8 +407,8 @@ static void __exit pciecom_exit(void) {
 module_init(pciecom_init);
 module_exit(pciecom_exit);
 
-MODULE_AUTHOR("kexin.he@bst.ai");
+MODULE_AUTHOR("931317255@qq.com");
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("A1000 comtest pcie rc and ep");
+MODULE_DESCRIPTION("xxxx comtest pcie rc and ep");
 MODULE_ALIAS("comtest pcie");
 
