@@ -33,6 +33,8 @@
 
 #define u64_to_uptr(x) ((void __user *)(unsigned long)(x))
 
+#define BLOCK_SIZE 4 * 1024
+
 static struct cdev comdev;
 
 struct ion_test_data {
@@ -43,6 +45,9 @@ struct ion_test_data {
 struct ion_test_device {
 	struct miscdevice misc;
 };
+
+dma_addr_t g_rc_dma_addr;
+dma_addr_t g_ep_dma_addr;
 
 static int pciecom_open(struct inode* inode, struct file* filp) {
 	printk("file open in pciecom_open......finished!\n");
@@ -66,40 +71,59 @@ static int pciecom_release(struct inode* inode, struct file* filp) {
 }
 
 static ssize_t pciecom_read(struct file* filp, char __user* buf, size_t count, loff_t* pos) {
-	// unsigned int copied = 0;
 	printk("call pciecom_read \n");
-	char tmp[256];
-	int cnt = count;
-	memset(tmp,0,256);
-	int i;
-	for (i=0; i<26; i++)
-		tmp[i] = i;
-	if (count > 256) cnt = 256;
+	// char tmp[256];
+	// int cnt = count;
+	// memset(tmp,0,256);
+	// int i;
+	// for (i=0; i<26; i++)
+	// 	tmp[i] = i;
+	// if (count > 256) cnt = 256;
 
-	if (!copy_to_user(buf, tmp, cnt)) {
-		return cnt;
+	// if (!copy_to_user(buf, tmp, cnt)) {
+	// 	return cnt;
+	// } else {
+	// 	return -1;
+	// }
+
+/////// EP read use below code
+/*
+	extern u32 dm_pcie_dma_read(u32, u32, u64, u64);
+	int ret = dm_pcie_dma_read(0, BLOCK_SIZE, g_rc_dma_addr, g_ep_dma_addr);
+	if (ret == 0) {
+		printk("ep read %d data success!\n", BLOCK_SIZE);
 	} else {
-		return -1;
+		printk("ep read %d data failed!\n", BLOCK_SIZE);
 	}
-	// return copied;
+	*/
 }
 
 static ssize_t pciecom_write(struct file* filp, const char __user* buf, size_t count, loff_t* pos) {
-	// unsigned int copied = 0;
 	printk("call pciecom_write \n");
-	char tmp[256];
-	int cnt = count;
-	memset(tmp,0,256);
-	if (count > 256) cnt = 256;
+	// char tmp[256];
+	// int cnt = count;
+	// memset(tmp,0,256);
+	// if (count > 256) cnt = 256;
 
-	if (!copy_from_user(tmp, buf, cnt)) {
-		printk(tmp); printk("###\n");
-		return cnt;
+	// if (!copy_from_user(tmp, buf, cnt)) {
+	// 	printk(tmp); printk("###\n");
+	// 	return cnt;
 
+	// } else {
+	// 	return -1;
+	// }
+
+	extern u32 dm_pcie_dma_write(u32, u32, u64, u64);
+
+	// use channel 0, write 0x40 bytes from g_rc_dma_addr to g_ep_dma_addr
+	int ret = dm_pcie_dma_write(0, BLOCK_SIZE, g_rc_dma_addr, g_ep_dma_addr); //rc-->ep
+	if (ret == 0) {
+		printk("rc write %d data success!\n", BLOCK_SIZE);
+		return BLOCK_SIZE;
 	} else {
+		printk("rc write %d data failed!\n", BLOCK_SIZE);
 		return -1;
 	}
-	// return copied;
 }
 
 
@@ -134,6 +158,7 @@ printk("ion_handle_test_dma1...\n");
 
 	for_each_sg(table->sgl, s, table->nents, i) {
 		s->dma_address = sg_phys(s);
+		g_rc_dma_addr = s->dma_address;
 		printk("DMA: 0x%x\n", s->dma_address);
 
 		// if (!check_addr("map_sg", hwdev, s->dma_address, s->length))
@@ -407,8 +432,8 @@ static void __exit pciecom_exit(void) {
 module_init(pciecom_init);
 module_exit(pciecom_exit);
 
-MODULE_AUTHOR("931317255@qq.com");
+MODULE_AUTHOR("kexin.he@bst.ai");
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("xxxx comtest pcie rc and ep");
+MODULE_DESCRIPTION("A1000 comtest pcie rc and ep");
 MODULE_ALIAS("comtest pcie");
 

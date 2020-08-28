@@ -11,15 +11,22 @@
 #include <memory.h>
 #include <vector>
 #include <iostream> 
+#include <csignal>
+#include <memory>
 #include "pcie_com.h"
 
 #define DEVNAME "/dev/pciecom"
 
+#define PAGE_NUM 1
+
 using namespace std;
 
+int g_filefd;
 int ionfd;  // /dev/ion的fd
+int g_mapfd;
 int heap_count;	
 std::vector<struct ion_heap_data> ion_heaps;  // 内核所以 heaps信息
+unsigned char* g_ptr;
 
 enum e_ErrorCode{
     OKAY,
@@ -34,15 +41,33 @@ enum e_ErrorCode{
     CLOSE_ION_FD_ERR,
 };
 
+void Release() {
+    int ret = munmap(g_ptr, getpagesize() * PAGE_NUM);
+    if(ret!=0) {
+        cout<<"ERROR: munmap failed"<<endl;
+    }
+
+    ret = close(g_mapfd);
+    if(ret!=0) {
+        cout<<"ERROR: close failed"<<endl;
+    }    
+
+    ret = ion_close(ionfd);
+    if(ret!=0) {
+        cout<<"ERROR: close failed"<<endl;
+    }
+    close(g_filefd);
+}
+
+void OnShutdown(int sig) {
+    (void)sig;
+    Release();
+}
+
 int main()
 {
-      char alpha[27];
-    int fd,i;
-    memset(alpha, 0, 27);
-
-    for(i = 0; i < 26; i++)
-        alpha[i] = 'A' + i;
-
+    std::signal(SIGINT, OnShutdown);
+    int fd;
     fd = open(DEVNAME, O_RDWR);
     if(fd == -1)
     {
@@ -52,9 +77,9 @@ int main()
     {
         printf("file %s is opening......successfully!\nits fd is %d\n", DEVNAME, fd);
     }
+    g_filefd = fd;
 
-
-    	ionfd = ion_open(); // 打开 /dev/ion
+    ionfd = ion_open(); // 打开 /dev/ion
     if(ionfd<=0) {
         cout<<"ion_open failed"<<endl;
         return -OPEN_ERR;
@@ -79,27 +104,29 @@ int main()
         
         if (heap.type != 4) continue;
 
-        ret = ion_alloc_fd(ionfd, getpagesize() * 2, 0, (1 << heap.heap_id), 0, &map_fd); // 对指定的heap分配2页内存
+        ret = ion_alloc_fd(ionfd, getpagesize() * PAGE_NUM, 0, (1 << heap.heap_id), 0, &map_fd); // 对指定的heap分配2页内存
         if(ret!=0 || map_fd <= 0){
             cout<<"ERROR: ion_alloc_fd failed"<<endl;
             return -ALLOC_ERR;
         }
+        g_mapfd = map_fd;
 
         unsigned char* ptr;
-        ptr = (unsigned char*)mmap(NULL, getpagesize() * 2, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                   map_fd, 0); // map 2页内存到用户态
+        ptr = (unsigned char*)mmap(NULL, getpagesize() * PAGE_NUM, PROT_READ | PROT_WRITE, MAP_SHARED, map_fd, 0); 
         if(ptr == MAP_FAILED){
             cout<<"ERROR: mmap failed"<<endl;
             return -MMAP_ERR;
         }
+        g_ptr = ptr;
 
-        memset(ptr, 0xaa, getpagesize() * 2);// 第1页内存设置为0
+        memset(ptr, 0x0, getpagesize() * PAGE_NUM);
 
-        ret =munmap(ptr, getpagesize() * 2);
-        if(ret!=0) {
-            cout<<"ERROR: munmap failed"<<endl;
-            return -MUNMAP_ERR;
-        }
+        // ret =munmap(ptr, getpagesize() * PAGE_NUM);
+
+        // if(ret!=0) {
+        //     cout<<"ERROR: munmap failed"<<endl;
+        //     return -MUNMAP_ERR;
+        // }
 
         ret = ioctl(fd, ION_IOC_TEST_SET_FD, map_fd);
         if (ret != 0) {
@@ -115,59 +142,26 @@ int main()
             printf("ioctl ERROR\n");
         }
 
-        ret = close(map_fd);  // close 函数将释放map_fd对应的内存
-        if(ret!=0) {
-            cout<<"ERROR: close failed"<<endl;
-            return -CLOSE_MAP_FD_ERR;
-        }    
+        // ret = close(map_fd);  // close 函数将释放map_fd对应的内存
+        // if(ret!=0) {
+        //     cout<<"ERROR: close failed"<<endl;
+        //     return -CLOSE_MAP_FD_ERR;
+        // }    
     }
-    ret = ion_close(ionfd);
-    if(ret!=0) {
-        cout<<"ERROR: close failed"<<endl;
-        return -CLOSE_ION_FD_ERR;
-    }  
-    
-    cout<<"all heaps test OK"<<endl;
-
-    close(fd);
-
-    return 0;
-
-
-    // char alpha[27];
-    // int fd,i;
-    // memset(alpha, 0, 27);
-
-    // for(i = 0; i < 26; i++)
-    //     alpha[i] = 'A' + i;
-
-    // fd = open(DEVNAME, O_RDWR);
-    // if(fd == -1)
-    // {
-    //     printf("file %s is opening......failure!", DEVNAME);
+    // ret = ion_close(ionfd);
+    // if(ret!=0) {
+    //     cout<<"ERROR: close failed"<<endl;
+    //     return -CLOSE_ION_FD_ERR;
     // }
-    // else
-    // {
-    //     printf("file %s is opening......successfully!\nits fd is %d\n", DEVNAME, fd);
-    // }
-
-    // getchar();
-
-    // printf("write A-Z to kernel......\n");
-
-    // write(fd, alpha, 26);
-
-    // getchar();
-
-    // printf("read datas from kernel.......\n");
-
-    // read(fd, alpha, 26);
-
-    // printf("%s\n", alpha);
-
-    // getchar();
-
     // close(fd);
 
-    // return 0;
+    std::shared_ptr<unsigned char []> buffer = std::make_shared<unsigned char []>(getpagesize() * PAGE_NUM);
+    ret = read(g_filefd, buffer.get(), getpagesize() * PAGE_NUM);
+    if (ret < 0) {
+        cout << "###read data failed!" << std::endl;
+    } else {
+        cout << "###read data: " << buffer.get() << std::endl;
+    }
+
+    return 0;
 }
